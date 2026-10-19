@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>蓁便誼 打卡平板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+:root{--bg:#FFF8F3;--fg:#3E2418;--muted:#8C6E60;--line:#F2DED3;--pink:#D9265F;--green:#2E7D3A;--green-soft:#E3F2E1;
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.wrap{display:flex;gap:6vmin;align-items:center;padding:4vmin}
+@media (orientation:portrait){.wrap{flex-direction:column;gap:4vmin}}
+.side{text-align:center;max-width:46vmin}
+.side img{width:16vmin;height:16vmin;border-radius:4vmin;object-fit:cover}
+h1{font-size:6vmin;font-weight:900;color:var(--pink);margin:2vmin 0 0}
+.time{font-size:13vmin;font-weight:900;font-variant-numeric:tabular-nums;line-height:1;margin-top:3vmin}
+.date{font-size:4vmin;color:var(--muted);margin-top:1.5vmin}
+.how{font-size:3.6vmin;margin-top:4vmin;background:var(--green-soft);color:var(--green);border-radius:3vmin;padding:2vmin 3vmin;font-weight:700}
+.qrbox{background:#fff;border-radius:5vmin;padding:4vmin;box-shadow:0 1vmin 0 var(--line);position:relative}
+#qr{width:62vmin;height:62vmin}
+#qr img,#qr canvas{width:100%!important;height:100%!important;image-rendering:pixelated}
+.bar{height:1.4vmin;background:var(--line);border-radius:1vmin;margin-top:3vmin;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--green);width:100%;transform-origin:left}
+.err{color:var(--pink);font-weight:700;font-size:3.6vmin;margin-top:2vmin;min-height:4vmin;text-align:center}
+.login{text-align:center}
+.login input{font:inherit;font-size:6vmin;width:40vmin;text-align:center;letter-spacing:1vmin;padding:2vmin;border-radius:3vmin;border:2px solid var(--line)}
+.login button{font:inherit;font-size:4.5vmin;font-weight:900;background:var(--pink);color:#fff;border:0;border-radius:99px;padding:2vmin 6vmin;margin-top:3vmin}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const CONFIG = {
+  LIFF_ID: '2011973016-sW6GsEke',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyyotabbS75Ve7CKl8eN0k0eOXCTA-JBGFbWoTctM7yWm7pXCuokoX0c7vosazhzX6Q/exec',
+};
+const DEMO = !CONFIG.API_URL;
+const W = ['日','一','二','三','四','五','六'];
+const app = document.getElementById('app');
+const store = { get(){ try { return localStorage.getItem('zby_kiosk_key'); } catch { return null; } },
+                set(v){ try { localStorage.setItem('zby_kiosk_key', v); } catch {} },
+                del(){ try { localStorage.removeItem('zby_kiosk_key'); } catch {} } };
+let key = store.get();
+
+function showLogin(msg) {
+  app.innerHTML = `<div class="login"><h1>蓁便誼 打卡平板</h1>
+    <p style="font-size:4vmin;color:var(--muted)">第一次使用，請輸入平板密碼</p>
+    <input id="k" inputmode="numeric" autocomplete="off"><br>
+    <button id="go">開始</button><div class="err">${msg || ''}</div></div>`;
+  document.getElementById('go').onclick = () => { key = document.getElementById('k').value.trim(); store.set(key); start(); };
+}
+
+function showKiosk() {
+  app.innerHTML = `<div class="wrap">
+    <div class="side"><img src="logo.png" alt=""><h1>員工打卡</h1>
+      <div class="time" id="time">--:--</div><div class="date" id="date"></div>
+      <div class="how">用 LINE 掃描 QR 碼<br>選「上班」或「下班」</div></div>
+    <div><div class="qrbox"><div id="qr"></div><div class="bar"><i id="bar"></i></div></div><div class="err" id="err"></div></div>
+  </div>`;
+}
+
+function clock() {
+  const n = new Date(), t = document.getElementById('time'); if (!t) return;
+  t.textContent = n.toTimeString().slice(0, 5);
+  document.getElementById('date').textContent = `${n.getMonth()+1}/${n.getDate()}（${W[n.getDay()]}）`;
+}
+setInterval(clock, 1000);
+
+let qr, timer;
+async function refresh() {
+  clearTimeout(timer);
+  let data;
+  try {
+    if (DEMO) data = { token: 'DEMO' + Math.random().toString(36).slice(2, 8), msLeft: 30000 - Date.now() % 30000 };
+    else {
+      const res = await fetch(CONFIG.API_URL, { method: 'POST', body: JSON.stringify({ action: 'kiosk', key }) });
+      data = await res.json();
+      if (!data.ok) {
+        if (/密碼/.test(data.error)) { store.del(); return showLogin(data.error); }
+        throw new Error(data.error);
+      }
+    }
+  } catch (e) {
+    const err = document.getElementById('err'); if (err) err.textContent = '連線失敗，重試中…';
+    timer = setTimeout(refresh, 5000); return;
+  }
+  if (!document.getElementById('qr')) { showKiosk(); clock(); qr = null; }
+  document.getElementById('err').textContent = '';
+  const url = `https://liff.line.me/${CONFIG.LIFF_ID}/punch.html?t=${encodeURIComponent(data.token)}`;
+  if (!qr) qr = new QRCode(document.getElementById('qr'), { text: url, width: 512, height: 512, correctLevel: QRCode.CorrectLevel.M });
+  else qr.makeCode(url);
+  const bar = document.getElementById('bar');
+  bar.style.transition = 'none'; bar.style.transform = `scaleX(${data.msLeft / 30000})`;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    bar.style.transition = `transform ${data.msLeft}ms linear`; bar.style.transform = 'scaleX(0)';
+  }));
+  timer = setTimeout(refresh, data.msLeft + 300);
+}
+
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { keepAwake(); refresh(); } });
+
+function start() { keepAwake(); refresh(); }
+if (DEMO || key) start(); else showLogin();
+</script>
+</body>
+</html>

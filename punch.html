@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>蓁便誼 員工打卡</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap">
+<style>
+:root{
+  --bg:#FFF8F3; --surface:#FFFFFF; --fg:#3E2418; --muted:#8C6E60; --line:#F2DED3;
+  --pink:#D9265F; --pink-soft:#FDE6EE; --green:#2E7D3A; --green-soft:#E3F2E1; --gold:#F2B33D;
+  --font:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#1F1517; --surface:#2B1E21; --fg:#F6E8E1; --muted:#C3A79A; --line:#46323A;
+  --pink:#FF6F9A; --pink-soft:#4A2532; --green:#7ED18A; --green-soft:#24362A; --gold:#F5C25E; color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);line-height:1.5;min-height:100vh}
+main{max-width:440px;margin:0 auto;padding:20px 16px 40px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand img{width:44px;height:44px;border-radius:12px;object-fit:cover}
+.brand h1{margin:0;font-size:19px;font-weight:900;color:var(--pink)}
+.brand p{margin:0;font-size:13px;color:var(--muted)}
+.clock{text-align:center;margin:26px 0 6px}
+.clock .t{font-size:56px;font-weight:900;letter-spacing:1px;font-variant-numeric:tabular-nums;line-height:1}
+.clock .d{color:var(--muted);font-size:15px;margin-top:6px}
+.hello{text-align:center;font-weight:700;font-size:17px;margin:14px 0 18px}
+.hello small{display:block;color:var(--muted);font-weight:400;font-size:13px}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.btn{border:0;border-radius:20px;padding:22px 8px;font:inherit;font-size:20px;font-weight:900;color:#fff;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:4px;box-shadow:0 3px 0 rgba(0,0,0,.12)}
+.btn span{font-size:30px;line-height:1}
+.btn.in{background:var(--green)} .btn.out{background:var(--pink)}
+.btn:disabled{opacity:.4;cursor:default}
+.card{background:var(--surface);border:1.5px solid var(--line);border-radius:16px;padding:14px 16px;margin-top:18px}
+.card h2{font-size:15px;margin:0 0 8px}
+.rec{display:flex;justify-content:space-between;padding:6px 0;border-top:1px dashed var(--line);font-variant-numeric:tabular-nums}
+.rec:first-of-type{border-top:0}
+.tag{font-size:12px;font-weight:700;border-radius:999px;padding:2px 8px}
+.tag.ok{background:var(--green-soft);color:var(--green)} .tag.bad{background:var(--pink-soft);color:var(--pink)}
+.msg{border-radius:14px;padding:14px 16px;margin-top:18px;font-weight:700;text-align:center}
+.msg.ok{background:var(--green-soft);color:var(--green)}
+.msg.err{background:var(--pink-soft);color:var(--pink)}
+.msg.info{background:var(--surface);border:1.5px solid var(--line);color:var(--fg);font-weight:500}
+.muted{color:var(--muted);font-size:13px}
+.big{font-size:44px;line-height:1.1}
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">
+    <img src="logo.png" alt="">
+    <div><h1>蓁便誼 員工打卡</h1><p>朝陽代買王</p></div>
+  </div>
+  <div class="clock"><div class="t" id="t">--:--</div><div class="d" id="d"></div></div>
+  <div id="app"><div class="msg info">載入中…</div></div>
+</main>
+
+<script>
+const CONFIG = {
+  LIFF_ID: '2011973016-sW6GsEke',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyyotabbS75Ve7CKl8eN0k0eOXCTA-JBGFbWoTctM7yWm7pXCuokoX0c7vosazhzX6Q/exec',
+};
+const DEMO = !CONFIG.API_URL;
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const W = ['日','一','二','三','四','五','六'];
+
+function tick() {
+  const n = new Date();
+  $('#t').textContent = n.toTimeString().slice(0, 8);
+  $('#d').textContent = `${n.getMonth()+1} 月 ${n.getDate()} 日（${W[n.getDay()]}）`;
+}
+tick(); setInterval(tick, 1000);
+
+const token = new URLSearchParams(location.search).get('t');
+let state = null;
+
+async function api(action, extra = {}) {
+  if (DEMO) {
+    await new Promise(r => setTimeout(r, 400));
+    const now = new Date().toTimeString().slice(0, 5);
+    if (action === 'status') return { name: '示範員工', enabled: true, workStart: '08:30', workEnd: '16:00', today: state?.today || [] };
+    const rec = { time: now, type: extra.type, late: extra.type === '上班' ? 0 : 0, early: 0 };
+    return { name: '示範員工', type: extra.type, time: now, late: 0, early: 0, today: [...(state?.today || []), rec] };
+  }
+  const res = await fetch(CONFIG.API_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action, idToken: liff.getIDToken(), t: token, ...extra }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || '發生錯誤，請稍後再試');
+  return data;
+}
+
+function loadScript(src) {
+  return new Promise((ok, bad) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = bad; document.head.appendChild(s); });
+}
+
+function records(list) {
+  if (!list.length) return '<p class="muted" style="margin:0">今天還沒有打卡紀錄</p>';
+  return list.map(r => {
+    const tag = r.late ? `<span class="tag bad">遲到 ${r.late} 分</span>`
+      : r.early ? `<span class="tag bad">早退 ${r.early} 分</span>` : '<span class="tag ok">準時</span>';
+    return `<div class="rec"><span><b>${esc(r.type)}</b>　${esc(r.time)}</span>${tag}</div>`;
+  }).join('');
+}
+
+function render(flash) {
+  const s = state;
+  if (!s.enabled) {
+    $('#app').innerHTML = `<div class="msg info"><div class="big">📝</div>
+      <p><b>${esc(s.name)}</b>，已收到你的員工登記。</p>
+      <p class="muted">請老闆到試算表「員工」工作表，把你那一列的「啟用」打勾，之後重新掃碼就能打卡。</p></div>`;
+    return;
+  }
+  const hasIn = s.today.some(r => r.type === '上班');
+  $('#app').innerHTML = `
+    <div class="hello">${esc(s.name)}，${hasIn ? '辛苦了！' : '早安！'}<small>上班 ${esc(s.workStart)}　下班 ${esc(s.workEnd)}</small></div>
+    ${token || DEMO ? `<div class="btns">
+      <button class="btn in" data-type="上班" ${hasIn ? 'disabled' : ''}><span>☀️</span>上班打卡</button>
+      <button class="btn out" data-type="下班"><span>🌙</span>下班打卡</button>
+    </div>` : `<div class="msg info">要打卡請用 LINE 掃描<b>門市平板</b>上的 QR 碼</div>`}
+    ${flash || ''}
+    <div class="card"><h2>今天的紀錄</h2>${records(s.today)}</div>`;
+  document.querySelectorAll('.btn').forEach(b => b.onclick = () => doPunch(b.dataset.type));
+}
+
+async function doPunch(type) {
+  document.querySelectorAll('.btn').forEach(b => b.disabled = true);
+  try {
+    const r = await api('punch', { type });
+    state.today = r.today;
+    const note = r.late ? `（遲到 ${r.late} 分鐘）` : r.early ? `（早退 ${r.early} 分鐘）` : '';
+    render(`<div class="msg ok"><div class="big">✅</div>${esc(type)}打卡成功　${esc(r.time)}${esc(note)}</div>`);
+  } catch (e) {
+    render(`<div class="msg err">${esc(e.message)}</div>`);
+  }
+}
+
+(async function main() {
+  try {
+    if (!DEMO) {
+      await loadScript('https://static.line-scdn.net/liff/edge/2/sdk.js');
+      await liff.init({ liffId: CONFIG.LIFF_ID });
+      if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+    }
+    state = await api('status');
+    render();
+  } catch (e) {
+    $('#app').innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>
