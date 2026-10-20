@@ -119,7 +119,7 @@ const todayStr = () => { const d = new Date(); return thisMonth() + '-' + String
 
 let S = { me: null, products: [], tab: 'sale', cart: [], pay: '現金', discount: '', paid: '',
           buy: { supplier: '', items: [], pay: '現金' }, report: null, month: thisMonth(), q: '', lowOnly: false, today: null };
-const isOwner = () => S.me && S.me.role === '老闆';
+const isOwner = () => !!S.me && (S.me.role === '老闆' || S.me.role === '總會計');  // 看得到成本與帳務
 const byCode = (code) => S.products.find(p => p.code === String(code));
 
 function toast(msg, err) {
