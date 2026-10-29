@@ -151,11 +151,26 @@ function loadScript(src) {
 }
 
 let busy = false;
+// LINE 登入憑證約 1 小時過期：過期就自動重新登入（30 秒內不重複，避免無限跳轉）
+function relogin() {
+  if (window.__ERP_TEST__) return false;
+  try {
+    const last = Number(sessionStorage.getItem('zby_relogin') || 0);
+    if (Date.now() - last < 30000) return false;
+    sessionStorage.setItem('zby_relogin', String(Date.now()));
+  } catch {}
+  try { liff.logout(); } catch {}
+  liff.login({ redirectUri: location.href.split('#')[0] });
+  return true;
+}
 async function api(action, extra = {}) {
   const idToken = window.__ERP_TEST__ ? window.__ERP_TEST__.idToken : liff.getIDToken();
   const res = await fetch(CONFIG.API_URL, { method: 'POST', body: JSON.stringify({ action, idToken, ...extra }) });
   const data = await res.json();
-  if (!data.ok) throw new Error(data.error || '發生錯誤');
+  if (!data.ok) {
+    if (/登入已過期/.test(data.error || '') && relogin()) throw new Error('登入已過期，正在重新登入…');
+    throw new Error(data.error || '發生錯誤');
+  }
   return data;
 }
 async function run(btn, fn) {
@@ -614,6 +629,8 @@ function render() {
       await loadScript('https://static.line-scdn.net/liff/edge/2/sdk.js');
       await liff.init({ liffId: CONFIG.LIFF_ID });
       if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+      const tok = liff.getDecodedIDToken();
+      if (!tok || tok.exp * 1000 < Date.now() + 60000) { if (relogin()) return; }
     }
     const r = await api('init');
     S.me = r.me;
