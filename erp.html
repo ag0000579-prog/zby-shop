@@ -92,6 +92,19 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 td{padding:5px 0;border-top:1px dashed var(--line);font-variant-numeric:tabular-nums}
 td:last-child{text-align:right}
 tr:first-child td{border-top:0}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.kpi{text-align:left;background:var(--surface);border:1.5px solid var(--line);border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:2px;font:inherit;color:inherit}
+.kpi:disabled{cursor:default;opacity:1}
+.kpi.big{grid-column:1/-1;background:var(--pink);border-color:var(--pink);color:#fff}
+.kpi.big .kpi-l,.kpi.big .kpi-s{color:#fff;opacity:.9}
+.kpi.big b{font-size:32px}
+.kpi-l{font-size:13px;color:var(--muted);font-weight:700}
+.kpi b{font-size:23px;font-weight:900;font-variant-numeric:tabular-nums;line-height:1.25}
+.kpi-s{font-size:12px;color:var(--muted);line-height:1.35}
+.kpi.pos b{color:var(--green)} .kpi.neg b{color:var(--pink)}
+.kpi.warn{border-color:var(--gold);background:var(--gold-soft)}
+.kpi.alert{border-color:var(--pink);background:var(--pink-soft)} .kpi.alert b{color:var(--pink)}
+@media (min-width:700px){.kpis{grid-template-columns:repeat(4,1fr)}}
 </style>
 </head>
 <body>
@@ -474,16 +487,124 @@ function renderBooks() {
   });
 }
 
+/* ---------------- 📊 總覽（老闆／總會計） ---------------- */
+async function loadDash() {
+  S.dash = null; if (S.tab === 'dash') renderDash();
+  try { S.dash = await api('dashboard'); } catch (e) { S.dashErr = e.message; }
+  if (S.tab === 'dash') renderDash();
+}
+function renderDash() {
+  $('#bar').innerHTML = '';
+  const D = S.dash;
+  if (!D) { $('#main').innerHTML = `<div class="center muted">${S.dashErr ? esc(S.dashErr) : '整理今日資料中…'}</div>`; return; }
+  const kpi = (icon, label, value, sub, cls = '', jump = '') => `<button class="kpi ${cls}" ${jump ? `data-jump="${jump}"` : 'disabled'}>
+    <span class="kpi-l">${icon} ${label}</span><b>${value}</b>${sub ? `<span class="kpi-s">${sub}</span>` : ''}</button>`;
+  const O = D.online, A = D.agent;
+  const w = ['日','一','二','三','四','五','六'][new Date(D.date + 'T12:00:00').getDay()];
+  const list = (title, items, row, empty) => `<div class="card"><h2>${title}</h2>${items.length
+    ? `<ul class="list">${items.map(row).join('')}</ul>` : `<p class="muted" style="margin:0">${empty}</p>`}</div>`;
+  $('#main').innerHTML = `
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <div><b style="font-size:18px">📊 今日營運概況</b><div class="hint">${esc(D.date)}（${w}）</div></div>
+      <button class="btn ghost" id="dash-re">↻ 重新整理</button></div>
+    <div class="kpis">
+      ${kpi('💵', '今日營業額', money(D.total.revenue), `門市 ${money(D.store.revenue)}・線上 ${money(O.pickedTodayAmount)}・代購費 ${money(A.feeToday)}`, 'big')}
+      ${kpi('🧾', '今日訂單', D.total.orders + ' 筆', `門市 ${D.store.orders}・線上新單 ${O.newToday}`)}
+      ${kpi('📈', '今日毛利（門市）', money(D.store.gross), D.store.revenue ? '毛利率 ' + Math.round(D.store.gross / D.store.revenue * 100) + '%' : '', D.store.gross >= 0 ? 'pos' : 'neg')}
+      ${kpi('🛍️', '待處理代購', A.open + ' 筆', `待下單 ${A.count['待下單']}・已下單 ${A.count['已下單']}・已到貨 ${A.count['已到貨']}`, A.open ? 'warn' : '', 'agent')}
+      ${kpi('📦', '待取貨訂單', O.ready.length + ' 筆', O.toConfirm ? `另有 ${O.toConfirm} 筆待確認` : '線上訂購「可取貨」', O.ready.length ? 'warn' : '')}
+      ${kpi('⏰', '逾期未取貨', O.overdue.length + ' 筆', '取貨日已過、還沒取貨', O.overdue.length ? 'alert' : '')}
+      ${kpi('⚠️', '庫存不足', D.low.length + ' 項', '低於安全庫存', D.low.length ? 'alert' : '', 'count')}
+      ${kpi('🗓️', '本月門市營業額', money(D.store.monthRevenue), '毛利 ' + money(D.store.monthGross), '', 'books')}
+    </div>
+    ${O.ok ? '' : `<div class="card" style="color:var(--pink)">讀不到線上訂購資料：${esc(O.error)}</div>`}
+    ${list(`⏰ 逾期未取貨 <span class="tag low">${O.overdue.length}</span>`, O.overdue, o => `<li class="item"><div class="grow">
+      <div class="nm">${esc(o.name)} <span class="sub">${esc(o.id)}</span></div><div class="sub">取貨日 ${esc(o.pickup)}・${esc(o.status)}・${esc(o.items)}</div></div>
+      <div class="num">${money(o.amount)}</div></li>`, '沒有逾期的訂單 👍')}
+    ${list(`📦 待取貨 <span class="tag in">${O.ready.length}</span>`, O.ready, o => `<li class="item"><div class="grow">
+      <div class="nm">${esc(o.name)}</div><div class="sub">取貨日 ${esc(o.pickup)}・${esc(o.items)}</div></div><div class="num">${money(o.amount)}</div></li>`, '目前沒有待取貨訂單')}
+    ${list(`🛍️ 代購進度 <span class="tag out">${A.open}</span>`, A.list, a => `<li class="item"><div class="grow">
+      <div class="nm">${esc(a.customer)} <span class="tag ${a.status === '已到貨' ? 'in' : 'out'}">${esc(a.status)}</span></div>
+      <div class="sub">${esc(a.platform)}・${esc(a.item)}${a.eta ? '・預計 ' + esc(a.eta) : ''}</div></div><div class="num">${money(a.total)}</div></li>`, '沒有進行中的代購')}
+    ${list(`⚠️ 庫存不足 <span class="tag low">${D.low.length}</span>`, D.low, p => `<li class="item"><div class="grow"><div class="nm">${esc(p.name)}</div>
+      <div class="sub">安全庫存 ${p.safety}</div></div><div class="num" style="color:var(--pink)">${p.stock}</div></li>`, '庫存都充足')}
+    <p class="hint">線上營業額以「已取貨、取貨日為今天」的 LINE 訂單計算；線上訂單沒有成本資料，所以毛利只算門市。</p>`;
+  $('#dash-re').onclick = loadDash;
+  $('#main').querySelectorAll('[data-jump]').forEach(b => b.onclick = () => { S.tab = b.dataset.jump; render(); if (S.tab === 'books') loadReport(S.month); });
+}
+
+/* ---------------- 🛍️ 代購 ---------------- */
+const agentFee = (amt) => (Number(amt) > 0 ? Math.max(35, Math.round(Number(amt) * 0.05)) : 0);
+async function loadAgents() {
+  try { S.agents = (await api('agentList')).agents; } catch (e) { toast(e.message, true); S.agents = []; }
+  if (S.tab === 'agent') renderAgent();
+}
+function renderAgent() {
+  $('#bar').innerHTML = '';
+  if (!S.agents) { $('#main').innerHTML = '<div class="center muted">載入中…</div>'; loadAgents(); return; }
+  const f = S.agentFilter || '進行中';
+  const open = ['待下單', '已下單', '已到貨'];
+  const list = S.agents.filter(a => f === '進行中' ? open.includes(a.status) : a.status === f);
+  const count = (st) => S.agents.filter(a => st === '進行中' ? open.includes(a.status) : a.status === st).length;
+  $('#main').innerHTML = `
+    <div class="card"><div class="row" style="justify-content:space-between">
+      <div><b>代購委託</b><div class="hint">服務費自動算：商品金額 5%，最低 $35</div></div>
+      <button class="btn" id="ag-new">＋ 新增代購</button></div>
+      <div class="chips" style="margin-top:10px">${['進行中', ...S.agentStatus].map(st => `<button class="chip ${f === st ? 'on' : ''}" data-af="${st}">${st} ${count(st)}</button>`).join('')}</div></div>
+    <div class="card">${list.length ? `<ul class="list">${list.map(a => `<li class="item" data-ag="${esc(a.id)}" style="cursor:pointer">
+      <div class="grow"><div class="nm">${esc(a.customer)} <span class="tag ${a.status === '已到貨' ? 'in' : a.status === '已取消' ? 'off' : 'out'}">${esc(a.status)}</span></div>
+      <div class="sub">${esc(a.platform)}・${esc(a.item)}</div>
+      <div class="sub">${esc(a.created)}${a.eta ? '・預計到貨 ' + esc(a.eta) : ''}${a.tracking ? '・物流 ' + esc(a.tracking) : ''}</div></div>
+      <div style="text-align:right"><div class="num">${money(a.total)}</div><div class="sub">服務費 ${money(a.fee)}</div></div></li>`).join('')}</ul>`
+      : '<p class="muted" style="margin:0">這個狀態目前沒有代購單。</p>'}</div>`;
+  $('#ag-new').onclick = () => agentForm({});
+  $('#main').querySelectorAll('[data-af]').forEach(b => b.onclick = () => { S.agentFilter = b.dataset.af; renderAgent(); });
+  $('#main').querySelectorAll('[data-ag]').forEach(li => li.onclick = () => agentForm(S.agents.find(a => a.id === li.dataset.ag)));
+}
+function agentForm(a) {
+  const isNew = !a.id;
+  $('#layer').innerHTML = `<div class="modal"><div class="sheet">
+    <h3>${isNew ? '新增代購' : '代購單 ' + esc(a.id)} <button class="x" id="af-x" aria-label="關閉">✕</button></h3>
+    <div class="grid2">
+      <label>客戶 <input id="af-c" value="${esc(a.customer || '')}" placeholder="姓名或 LINE 名稱"></label>
+      <label>電話 <input id="af-p" value="${esc(a.phone || '')}" inputmode="tel"></label>
+      <label>平台 <select id="af-pf">${S.agentPlatforms.map(p => `<option ${a.platform === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select></label>
+      <label>預計到貨 <input id="af-eta" type="date" value="${esc(a.eta || '')}"></label>
+      <label style="grid-column:1/-1">代購商品 <input id="af-i" value="${esc(a.item || '')}" placeholder="例如：JOLLY 微波爆米花 x3 盒"></label>
+      <label>商品金額 <input id="af-a" type="number" inputmode="decimal" value="${a.amount ?? ''}"></label>
+      <label>服務費 <input id="af-f" type="number" inputmode="decimal" value="${a.fee ?? ''}" placeholder="自動計算"></label>
+      <label>物流單號 <input id="af-t" value="${esc(a.tracking || '')}"></label>
+      <label>狀態 <select id="af-s">${S.agentStatus.map(st => `<option ${(a.status || '待下單') === st ? 'selected' : ''}>${st}</option>`).join('')}</select></label>
+      <label style="grid-column:1/-1">備註 <input id="af-n" value="${esc(a.note || '')}"></label>
+    </div>
+    <div class="total" style="margin-top:12px;font-size:17px"><span>應收合計</span><b id="af-sum">$0</b></div>
+    <p class="hint" style="margin:4px 0 0">狀態改成「已取貨」時，服務費會自動記入帳務的「代購服務費」收入。</p>
+    <button class="btn big" id="af-go" style="margin-top:12px">儲存</button>
+  </div></div>`;
+  const sum = () => { const amt = Number($('#af-a').value) || 0; const fee = $('#af-f').value === '' ? agentFee(amt) : Number($('#af-f').value);
+    $('#af-f').placeholder = '自動 ' + agentFee(amt); $('#af-sum').textContent = money(amt + fee); };
+  $('#af-a').oninput = sum; $('#af-f').oninput = sum; sum();
+  $('#af-x').onclick = () => $('#layer').innerHTML = '';
+  $('#af-go').onclick = (e) => run(e.target, async () => {
+    const r = await api('agentSave', { agent: { id: a.id, customer: $('#af-c').value, phone: $('#af-p').value, platform: $('#af-pf').value,
+      eta: $('#af-eta').value, item: $('#af-i').value, amount: $('#af-a').value, fee: $('#af-f').value, tracking: $('#af-t').value,
+      status: $('#af-s').value, note: $('#af-n').value } });
+    S.agents = r.agents; $('#layer').innerHTML = ''; renderAgent(); toast('已儲存代購單');
+  });
+}
+
 /* ---------------- 主框架 ---------------- */
-const TABS = [['sale', '🛒 結帳'], ['buy', '📦 進貨'], ['count', '📋 盤點'], ['products', '🏷️ 商品'], ['books', '💰 帳務']];
+const TABS = [['dash', '📊 總覽'], ['sale', '🛒 結帳'], ['agent', '🛍️ 代購'], ['buy', '📦 進貨'], ['count', '📋 盤點'], ['products', '🏷️ 商品'], ['books', '💰 帳務']];
 function render() {
-  const tabs = TABS.filter(([k]) => k !== 'books' || isOwner());
+  const tabs = TABS.filter(([k]) => (k !== 'books' && k !== 'dash') || isOwner());
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button class="${S.tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach(b => b.onclick = () => {
     S.tab = b.dataset.tab; render();
     if (S.tab === 'books' && (!S.report || S.report.month !== S.month)) loadReport(S.month);
+    if (S.tab === 'dash') loadDash();
+    if (S.tab === 'agent') loadAgents();
   });
-  ({ sale: renderSale, buy: renderBuy, count: renderCount, products: renderProducts, books: renderBooks })[S.tab]();
+  ({ dash: renderDash, sale: renderSale, agent: renderAgent, buy: renderBuy, count: renderCount, products: renderProducts, books: renderBooks })[S.tab]();
 }
 
 (async function main() {
@@ -502,7 +623,9 @@ function render() {
         <p class="muted">請老闆打開「蓁便誼ERP」試算表的「使用者」工作表，把你那一列的「啟用」打勾，再重新整理這頁。</p></div>`;
       return;
     }
-    Object.assign(S, { products: r.products, paySale: r.paySale, payBuy: r.payBuy, ledgerCats: r.ledgerCats, today: r.today, bkType: '支出' });
+    Object.assign(S, { products: r.products, paySale: r.paySale, payBuy: r.payBuy, ledgerCats: r.ledgerCats, today: r.today, bkType: '支出',
+      agentStatus: r.agentStatus || ['待下單', '已下單', '已到貨', '已取貨', '已取消'], agentPlatforms: r.agentPlatforms || ['其他'] });
+    if (isOwner()) { S.tab = 'dash'; loadDash(); }
     if (r.me.isNew) toast('歡迎！你是第一位使用者，已設為老闆');
     render();
   } catch (e) {
