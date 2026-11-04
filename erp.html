@@ -243,10 +243,11 @@ async function openScanner(onCode, continuous) {
   const close = async () => { await stopCam(); layer.innerHTML = ''; };
   $('#sc-close').onclick = close;
   if ($('#sc-done')) $('#sc-done').onclick = close;
-  const found = (text) => {
+  const found = async (text) => {
     beep();
-    if (continuous) { onCode(text); const p = byCode(text); $('#sc-found').textContent = p ? '✓ ' + p.name : '新條碼 ' + text; }
-    else { close(); onCode(text); }
+    // 連續掃：已建檔的商品直接加入；新條碼要開「新增商品」表單，先關相機
+    if (continuous && byCode(text)) { onCode(text); const el = $('#sc-found'); if (el) el.textContent = '✓ ' + byCode(text).name; }
+    else { await close(); onCode(text); }   // 先關掉掃描畫面，再開下一個畫面（避免新表單被清掉）
   };
   // 拍照辨識：iPhone 照片解析度高，細條碼也認得出來
   $('#sc-file').onchange = async (e) => {
@@ -309,7 +310,15 @@ function productForm(p, then, note) {
     <button class="btn big" id="pf-save" style="margin-top:14px">儲存</button>
   </div></div>`;
   $('#pf-x').onclick = () => $('#layer').innerHTML = '';
-  if ($('#pf-cam')) $('#pf-cam').onclick = () => openScanner((c) => productForm({ ...readForm(), code: c, isNew: true }, then, note));
+  // 先記下已填的內容，再開相機（掃描畫面會蓋掉表單）；掃到後帶回表單並填上條碼
+  if ($('#pf-cam')) $('#pf-cam').onclick = () => {
+    const saved = readForm();
+    openScanner((c) => {
+      const dup = byCode(c);
+      if (dup) { toast('條碼 ' + c + ' 已經是「' + dup.name + '」', true); productForm(dup); return; }
+      productForm({ ...saved, code: c, isNew: true }, then, note);
+    });
+  };
   function readForm() {
     return { code: $('#pf-code').value.trim(), name: $('#pf-name').value.trim(), cat: $('#pf-cat').value.trim(), unit: $('#pf-unit').value.trim(),
       price: $('#pf-price').value, cost: own ? $('#pf-cost').value : undefined, safety: $('#pf-safety').value, active: $('#pf-active').value === '1' };
