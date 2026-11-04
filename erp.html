@@ -221,35 +221,66 @@ function search(q) {
 
 /* ---------------- 相機掃碼 ---------------- */
 let scanner = null;
+async function scannerLib() {
+  if (!window.Html5Qrcode && !window.__Html5QrcodeLibrary__) await loadScript(SCANNER_JS);
+  const L = window.Html5Qrcode ? window : window.__Html5QrcodeLibrary__;
+  const F = L.Html5QrcodeSupportedFormats;
+  // 只找商品條碼格式（不找 QR），iPhone 上辨識比較快
+  return { L, cfg: { verbose: false, useBarCodeDetectorIfSupported: true, experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39] } };
+}
 async function openScanner(onCode, continuous) {
   const layer = $('#layer');
   layer.innerHTML = `<div class="modal"><div class="sheet">
     <h3>對準條碼 <button class="x" id="sc-close" aria-label="關閉">✕</button></h3>
-    <div id="reader"></div>
-    <div class="found" id="sc-found">${continuous ? '可以連續掃，掃完按「完成」' : '把條碼放進框框裡'}</div>
+    <div id="reader"></div><div id="reader-file" hidden></div>
+    <div class="found" id="sc-found">${continuous ? '可以連續掃，掃完按「完成」' : '條碼放進框框裡，距離約 10～15 公分'}</div>
+    <label class="btn ghost big" style="display:block;text-align:center;margin-top:8px;cursor:pointer">📸 掃不到？改用拍照辨識
+      <input type="file" accept="image/*" capture="environment" id="sc-file" hidden></label>
     ${continuous ? '<button class="btn big green" id="sc-done" style="margin-top:8px">完成</button>' : ''}
   </div></div>`;
-  const close = async () => { try { if (scanner) { await scanner.stop(); scanner.clear(); } } catch {} scanner = null; layer.innerHTML = ''; };
+  const stopCam = async () => { try { if (scanner) { await scanner.stop(); scanner.clear(); } } catch {} scanner = null; };
+  const close = async () => { await stopCam(); layer.innerHTML = ''; };
   $('#sc-close').onclick = close;
   if ($('#sc-done')) $('#sc-done').onclick = close;
+  const found = (text) => {
+    beep();
+    if (continuous) { onCode(text); const p = byCode(text); $('#sc-found').textContent = p ? '✓ ' + p.name : '新條碼 ' + text; }
+    else { close(); onCode(text); }
+  };
+  // 拍照辨識：iPhone 照片解析度高，細條碼也認得出來
+  $('#sc-file').onchange = async (e) => {
+    const file = e.target.files && e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    $('#sc-found').textContent = '辨識照片中…';
+    try {
+      const { L, cfg } = await scannerLib();
+      const fileScanner = new L.Html5Qrcode('reader-file', cfg);
+      const text = await fileScanner.scanFile(file, false);
+      try { fileScanner.clear(); } catch {}
+      found(text);
+    } catch {
+      $('#sc-found').innerHTML = '<span style="color:var(--pink)">照片裡找不到條碼</span><br><span class="hint">條碼拍大一點、拍清楚、不要反光，再試一次；或直接在搜尋框輸入條碼數字。</span>';
+    }
+  };
   try {
-    if (!window.Html5Qrcode && !window.__Html5QrcodeLibrary__) await loadScript(SCANNER_JS);
-    const L = window.Html5Qrcode ? window : window.__Html5QrcodeLibrary__;
-    const F = L.Html5QrcodeSupportedFormats;
-    scanner = new L.Html5Qrcode('reader', { verbose: false, useBarCodeDetectorIfSupported: true, experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-      formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.QR_CODE] });
+    const { L, cfg } = await scannerLib();
+    scanner = new L.Html5Qrcode('reader', cfg);
     let last = '', lastAt = 0;
-    await scanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: (w, h) => ({ width: Math.min(w * .85, 340), height: Math.min(h * .45, 170) }) },
+    await scanner.start({ facingMode: 'environment' }, {
+        fps: 15,
+        qrbox: (w, h) => ({ width: Math.floor(Math.min(w * .9, 380)), height: Math.floor(Math.min(h * .4, 180)) }),
+        // 提高解析度並持續自動對焦，細的商品條碼比較認得出來
+        videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] },
+      },
       (text) => {
         const now = Date.now();
         if (text === last && now - lastAt < 1500) return;   // 同一個條碼 1.5 秒內不重複算
-        last = text; lastAt = now; beep();
-        if (continuous) { onCode(text); const p = byCode(text); $('#sc-found').textContent = p ? '✓ ' + p.name : '新條碼 ' + text; }
-        else { close(); onCode(text); }
+        last = text; lastAt = now; found(text);
       }, () => {});
   } catch (e) {
     $('#sc-found').innerHTML = `<span style="color:var(--pink)">相機無法開啟：${esc(e.message || e)}</span><br>
-      <span class="hint">請允許相機權限；在 LINE 裡打不開的話，改用 Safari／Chrome 開啟這個網址。</span>`;
+      <span class="hint">可以改按下面「拍照辨識」；或在 LINE 右上「⋯」→ 用 Safari 開啟。</span>`;
   }
 }
 
