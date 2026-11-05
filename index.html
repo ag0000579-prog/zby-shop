@@ -235,20 +235,63 @@ async function api(action, extra = {}) {
 
 function loadScript(src){ return new Promise((ok,fail)=>{ const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=()=>fail(new Error('無法載入 LINE 元件')); document.head.appendChild(s); }); }
 
+// 是否有可用的 LINE 身分（社群／FB／IG 等地方打開時沒有）
+function hasToken() {
+  if (DEMO) return true;
+  try {
+    if (!liff.isLoggedIn() || !liff.getIDToken()) return false;
+    const t = liff.getDecodedIDToken();
+    return !!t && t.exp * 1000 > Date.now() + 60000;
+  } catch { return false; }
+}
+
+// 訪客模式：不需登入就能看商品（讀後台公開的商品清單）
+async function loadGuest() {
+  const res = await fetch(CONFIG.API_URL);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || '商品載入失敗，請稍後再試');
+  state.products = (data.products || []).map(p => ({
+    id: String(p.id), name: String(p.name || ''), category: String(p.category || '其他'),
+    price: Number(p.price) || 0, unit: String(p.unit || ''), image: String(p.image || ''),
+    stock: p.stock === '' || p.stock === null || p.stock === undefined ? null : Number(p.stock),
+    desc: String(p.desc || p.note || ''),
+  })).filter(p => p.id && p.name);
+  state.guest = true;
+  $('hello').textContent = '👀 瀏覽模式：選好商品，結帳時再用 LINE 登入';
+}
+
+// 需要身分時（結帳、我的訂單）才登入
+function requireLogin() {
+  saveCart();
+  if (DEMO) return;
+  const liffUrl = 'https://liff.line.me/' + CONFIG.LIFF_ID;
+  if (liff.isInClient()) {
+    // 在 LINE 社群等地方打開時拿不到身分：改用 LINE 一般模式重新開啟
+    toast('正在用 LINE 重新開啟，以便登入下單…');
+    liff.openWindow({ url: liffUrl, external: true });
+  } else {
+    liff.login({ redirectUri: location.href.split('#')[0] });
+  }
+}
+
 async function boot() {
   try {
     if (!DEMO) {
       await loadScript('https://static.line-scdn.net/liff/edge/2/sdk.js');
       await liff.init({ liffId: CONFIG.LIFF_ID });
-      if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
     } else {
       $('demo').hidden = false;
     }
-    const d = await api('init');
-    Object.assign(state, { products: d.products, pickupDates: d.pickupDates, member: d.member, user: d.user });
+    let d = null;
+    if (hasToken()) { try { d = await api('init'); } catch { d = null; } }
+    if (d) {
+      Object.assign(state, { products: d.products, pickupDates: d.pickupDates, member: d.member, user: d.user, guest: false });
+      if (d.user?.displayName) $('hello').textContent = `嗨，${d.user.displayName}！今天想買什麼？`;
+    } else {
+      await loadGuest();
+    }
     try { state.cart = JSON.parse(localStorage.getItem('zby-cart') || '{}'); } catch { state.cart = {}; }
     for (const id in state.cart) if (!state.products.some(p => p.id === id)) delete state.cart[id];
-    if (d.user?.displayName) $('hello').textContent = `嗨，${d.user.displayName}！今天想買什麼？`;
     $('loading').hidden = true;
     show('shop');
   } catch (e) {
@@ -309,6 +352,7 @@ function renderShop() {
   $('bar-total').textContent = money(cartTotal());
   $('bar-count').textContent = n ? `已選 ${n} 件・到店付款取貨` : '尚未選購';
   $('bar-go').disabled = !n;
+  $('bar-go').textContent = state.guest ? 'LINE 登入結帳' : '去結帳';
 }
 
 function renderCheckout() {
@@ -351,11 +395,11 @@ document.addEventListener('click', (e) => {
   else if (t.dataset.cat) { state.cat = t.dataset.cat; renderShop(); }
 });
 $('tab-shop').onclick = () => show('shop');
-$('tab-orders').onclick = () => show('orders');
-$('bar-go').onclick = () => show('checkout');
+$('tab-orders').onclick = () => state.guest ? requireLogin() : show('orders');
+$('bar-go').onclick = () => state.guest ? requireLogin() : show('checkout');
 $('ck-back').onclick = () => show('shop');
 $('done-shop').onclick = () => show('shop');
-$('done-orders').onclick = () => show('orders');
+$('done-orders').onclick = () => state.guest ? requireLogin() : show('orders');
 
 $('ck-form').addEventListener('submit', async (e) => {
   e.preventDefault();
