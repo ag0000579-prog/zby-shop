@@ -441,24 +441,60 @@ function renderBuy() {
 
 /* ---------------- 盤點 ---------------- */
 let countPick = null;
+// 距離效期剩幾天（沒有效期回傳 null）
+function daysLeft(exp) {
+  if (!exp) return null;
+  const t = new Date(exp + 'T00:00:00+08:00'), now = new Date();
+  return Math.ceil((t - now) / 86400000);
+}
+function expTag(exp) {
+  const d = daysLeft(exp);
+  if (d === null) return '';
+  if (d < 0) return `<span class="tag low">已過期 ${-d} 天</span>`;
+  if (d <= 30) return `<span class="tag out">剩 ${d} 天</span>`;
+  return `<span class="tag in">${esc(exp)}</span>`;
+}
 function renderCount() {
+  const own = isOwner();
   const low = S.products.filter(p => p.active && p.safety > 0 && p.stock <= p.safety);
+  const soon = S.products.filter(p => p.active && p.exp && daysLeft(p.exp) <= 30)
+    .sort((a, b) => (a.exp < b.exp ? -1 : 1));
   const p = countPick && byCode(countPick);
   $('#main').innerHTML = `
     <div class="card">${scanBox('cnt-in', '掃要盤點的商品／輸入品名')}</div>
-    ${p ? `<div class="card"><h2>${esc(p.name)} <span class="muted" style="font-size:12px">${esc(p.code)}</span></h2>
+    ${p ? `<div class="card"><h2>${esc(p.name)} <span class="muted" style="font-size:12px">${esc(p.code)}</span> ${expTag(p.exp)}</h2>
       <div class="grid2"><div class="stat"><span>系統庫存</span><b>${p.stock}</b></div>
         <label>實際數到 <input id="cnt-n" type="number" inputmode="numeric" placeholder="輸入數量"></label></div>
+      <div class="${own ? 'grid3' : 'grid2'}" style="margin-top:8px">
+        ${own ? `<label>進貨價（成本）<input id="cnt-cost" type="number" inputmode="decimal" value="${p.cost ?? ''}" placeholder="0"></label>` : ''}
+        <label>售價 <input id="cnt-price" type="number" inputmode="decimal" value="${p.price ?? ''}" placeholder="0"></label>
+        <label>效期 <input id="cnt-exp" type="date" value="${esc(p.exp || '')}"></label>
+      </div>
+      ${own && p.price ? `<p class="muted" style="margin:6px 0 0;font-size:12px" id="cnt-margin"></p>` : ''}
       <label style="margin-top:8px">原因（選填）<input id="cnt-r" placeholder="例如：月盤、破損、過期"></label>
       <button class="btn big green" id="cnt-go" style="margin-top:12px">更新庫存</button></div>` : ''}
+    <div class="card"><h2>即將到期 <span class="tag out">${soon.length} 項</span> <span class="muted" style="font-size:12px">30 天內或已過期</span></h2>
+      ${soon.length ? `<ul class="list">${soon.map(p => `<li class="item"><div class="grow"><div class="nm">${esc(p.name)}</div>
+        <div class="sub">效期 ${esc(p.exp)}・庫存 ${p.stock}</div></div><div>${expTag(p.exp)}</div></li>`).join('')}</ul>`
+        : '<p class="muted" style="margin:0">目前沒有 30 天內到期的商品。</p>'}</div>
     <div class="card"><h2>庫存不足 <span class="tag low">${low.length} 項</span></h2>
       ${low.length ? `<ul class="list">${low.map(p => `<li class="item"><div class="grow"><div class="nm">${esc(p.name)}</div>
         <div class="sub">安全庫存 ${p.safety}</div></div><div class="num" style="color:var(--pink)">${p.stock}</div></li>`).join('')}</ul>`
         : '<p class="muted" style="margin:0">目前沒有低於安全庫存的商品。</p>'}</div>`;
   $('#bar').innerHTML = '';
   bindScanBox('cnt-in', (x) => { countPick = x.code; renderCount(); setTimeout(() => $('#cnt-n') && $('#cnt-n').focus(), 50); });
+  // 老闆看得到毛利率，改成本或售價時即時更新
+  const showMargin = () => {
+    const m = $('#cnt-margin'); if (!m) return;
+    const c = Number($('#cnt-cost').value), pr = Number($('#cnt-price').value);
+    m.textContent = pr > 0 && c >= 0 ? `毛利 ${money(pr - c)}・毛利率 ${Math.round((pr - c) / pr * 100)}%` : '';
+  };
+  if ($('#cnt-cost')) { $('#cnt-cost').oninput = showMargin; $('#cnt-price').oninput = showMargin; showMargin(); }
   if ($('#cnt-go')) $('#cnt-go').onclick = (e) => run(e.target, async () => {
-    const r = await api('count', { count: { code: p.code, actual: $('#cnt-n').value, reason: $('#cnt-r').value } });
+    const body = { code: p.code, actual: $('#cnt-n').value, reason: $('#cnt-r').value,
+      price: $('#cnt-price').value, exp: $('#cnt-exp').value };
+    if ($('#cnt-cost')) body.cost = $('#cnt-cost').value;
+    const r = await api('count', { count: body });
     S.products = r.products; countPick = null; renderCount();
     toast(r.diff === 0 ? '庫存正確，沒有差異' : `已更新，差異 ${r.diff > 0 ? '+' : ''}${r.diff}`);
   });
